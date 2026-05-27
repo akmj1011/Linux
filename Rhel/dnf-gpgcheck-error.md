@@ -1,4 +1,4 @@
-# RHEL – DNF update troubleshooting (cache / metadata issue)
+# RHEL – DNF update troubleshooting (GPG check failure / cache metadata issue)
 
 ## System
 - OS: Red Hat Enterprise Linux
@@ -6,9 +6,15 @@
 
 ## Problem
 
-`dnf update` was failing during package refresh/update.
+While installing Python packages and running `dnf update`, the operation failed due to a GPG signature verification error.
 
-I suspected cached metadata corruption or an issue with release packages.
+The package manager was unable to verify package signatures, which blocked package installation and system updates.
+
+I investigated whether the issue was caused by:
+- stale or corrupted dnf metadata
+- cached package corruption
+- outdated release package metadata
+- repository configuration issues
 
 ---
 
@@ -21,40 +27,46 @@ dnf clean packages
 ```
 
 Why:
-Clears previously downloaded RPM package files to remove potentially corrupted downloads.
+
+Cleared previously downloaded RPM packages in case corrupted package files were causing the failure.
 
 ---
 
-### 2. Verify release package state
+### 2. Verify RHEL release package state
 
 ```bash
 rpm -q redhat-release redhat-release-eula redhat-release-notes || true
 ```
 
 Why:
-Checks whether core RHEL release packages are installed correctly.
+
+Validated that core RHEL release packages were installed correctly.
 
 ---
 
-### 3. Clear all dnf metadata/cache
+### 3. Clear all dnf metadata and cache
 
 ```bash
 sudo dnf clean all
 ```
 
 Why:
-Removes cached repository metadata and package information.
+
+Removed cached repository metadata and package cache.
 
 ---
 
-### 4. Remove dnf cache manually
+### 4. Remove remaining dnf cache manually
 
 ```bash
 sudo rm -rf /var/cache/dnf
 ```
 
 Why:
-Force removes remaining cache files if `dnf clean all` does not fully clear them.
+
+Force removed leftover cache files after `dnf clean all`.
+
+Used in case stale metadata remained on disk.
 
 ---
 
@@ -65,7 +77,8 @@ sudo subscription-manager repos --list-enabled
 ```
 
 Why:
-Confirms the required Red Hat repositories are enabled and subscription access is valid.
+
+Verified that the correct Red Hat repositories were enabled and the system subscription was valid.
 
 ---
 
@@ -76,43 +89,50 @@ df -HT
 ```
 
 Why:
-Ensures enough disk space is available for package downloads and updates.
+
+Confirmed sufficient disk space was available for downloads and updates.
+
+This ruled out incomplete package downloads caused by low disk space.
 
 ---
 
-### 7. Refresh release packages
+### 7. Refresh release packages while bypassing GPG verification temporarily
 
 ```bash
 sudo dnf update --refresh --nogpgcheck redhat-release redhat-release-eula
 ```
 
 Why:
-Refreshes repository metadata and updates release packages.
 
-Note:
-`--nogpgcheck` was used temporarily during troubleshooting.
+The original failure occurred because GPG signature verification was failing during package installation.
+
+`--nogpgcheck` was used temporarily during troubleshooting to bypass signature validation and refresh the release packages and repository metadata.
+
+This allowed package metadata to refresh successfully before retrying normal updates.
 
 ---
 
-### 8. Re-verify package state
+### 8. Re-verify release packages
 
 ```bash
 rpm -q redhat-release redhat-release-eula
 ```
 
 Why:
-Confirms release packages updated successfully.
+
+Confirmed that release packages updated successfully after refresh.
 
 ---
 
-### 9. Rebuild metadata cache
+### 9. Rebuild dnf metadata cache
 
 ```bash
 sudo dnf makecache
 ```
 
 Why:
-Downloads fresh metadata from enabled repositories.
+
+Rebuilt repository metadata cache from enabled repositories using fresh metadata.
 
 ---
 
@@ -123,28 +143,52 @@ sudo dnf update
 ```
 
 Why:
-Confirms the issue is resolved with a normal update.
+
+Retested package management normally after cache cleanup and release package refresh.
+
+Update completed successfully.
 
 ---
 
 ## Root cause
 
-Likely stale or corrupted dnf cache/metadata, or outdated release package metadata.
+The issue was caused by GPG signature verification failures while installing Python-related packages with `dnf`.
+
+Likely contributing causes:
+- stale or corrupted dnf cache
+- outdated repository metadata
+- release package metadata requiring refresh
+
+Refreshing the release packages and rebuilding the dnf metadata cache resolved the issue.
 
 ---
 
 ## Resolution
 
 Issue resolved after:
-- clearing dnf cache
-- validating repository configuration
-- refreshing release packages
-- rebuilding repository metadata cache
+
+- clearing cached RPM packages
+- clearing dnf metadata cache
+- manually removing `/var/cache/dnf`
+- verifying enabled repositories
+- refreshing `redhat-release` packages
+- rebuilding dnf metadata cache
+- retrying package update normally
+
+After these steps:
+
+```bash
+sudo dnf update
+```
+
+completed successfully without errors.
 
 ---
 
 ## What I learned
 
-- `dnf clean all` removes most metadata, but `/var/cache/dnf` may still need manual cleanup.
-- `subscription-manager repos --list-enabled` is useful to verify repository access.
-- Checking `redhat-release` package health can help identify RHEL repo/version-related issues before a full update.
+- GPG signature verification failures can sometimes be related to stale repository metadata rather than invalid packages.
+- `dnf clean all` may not always remove everything, and manual cleanup of `/var/cache/dnf` can help.
+- `subscription-manager repos --list-enabled` is useful to validate repository access during troubleshooting.
+- Temporarily using `--nogpgcheck` can help refresh package metadata during debugging, but normal package operations should be re-tested afterward with GPG validation enabled.
+- Verifying `redhat-release` package state is useful when troubleshooting repository or update failures on RHEL.
